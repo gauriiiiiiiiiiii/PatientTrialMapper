@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+.venv/
+venv/
+env/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data — never commit raw patient data
+data/raw/
+data/processed/
+data/synthetic/
+*.jsonl
+*.parquet
+*.csv
+
+# Model weights and adapters
+models/
+checkpoints/
+*.bin
+*.safetensors
+*.pt
+*.pth
+adapter_model/
+
+# Logs and runs
+logs/
+runs/
+mlruns/
+wandb/
+*.log
+
+# Evidently reports
+monitoring/reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+.env
+*.key
+secrets.yaml
