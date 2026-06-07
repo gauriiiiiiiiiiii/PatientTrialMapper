@@ -67,6 +67,7 @@ def load_base_model() -> AutoModelForCausalLM:
         'quantization_config': bnb_config,
         'device_map': 'auto',
         'trust_remote_code': True,
+        'torch_dtype': torch.float16,
     }
     if config.HF_TOKEN:
         kwargs['token'] = config.HF_TOKEN
