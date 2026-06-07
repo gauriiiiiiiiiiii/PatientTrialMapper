@@ -8,9 +8,7 @@ Saves adapter weights to models/lora_adapters/ (~50-100 MB, not the full model).
 
 Requirements:
   - NVIDIA GPU with at least 6 GB VRAM (T4, RTX 3060, etc.)
-  - bitsandbytes works on Linux/WSL2. On native Windows, prefer running on Colab.
-  - For Mistral: set HF_TOKEN in config.py and accept terms at
-    https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3
+  - bitsandbytes works on Linux/WSL2 / Kaggle / Colab.
 """
 
 import sys
@@ -63,15 +61,22 @@ def load_base_model() -> AutoModelForCausalLM:
         bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=True,
     )
-    kwargs = {
+    # Use 'dtype' (newer transformers) with float16 to avoid bf16/fp16 scaler conflict
+    from_pretrained_kwargs = {
         'quantization_config': bnb_config,
         'device_map': 'auto',
         'trust_remote_code': True,
-        'torch_dtype': torch.float16,
     }
+    tf_ver = _ver(transformers.__version__)
+    if tf_ver >= (4, 46):
+        from_pretrained_kwargs['dtype'] = torch.float16
+    else:
+        from_pretrained_kwargs['torch_dtype'] = torch.float16
+
     if config.HF_TOKEN:
-        kwargs['token'] = config.HF_TOKEN
-    model = AutoModelForCausalLM.from_pretrained(config.BASE_MODEL, **kwargs)
+        from_pretrained_kwargs['token'] = config.HF_TOKEN
+
+    model = AutoModelForCausalLM.from_pretrained(config.BASE_MODEL, **from_pretrained_kwargs)
     model.config.use_cache = False
     model.config.pretraining_tp = 1
     return model
@@ -88,6 +93,12 @@ def apply_lora(model: AutoModelForCausalLM) -> AutoModelForCausalLM:
         task_type='CAUSAL_LM',
     )
     model = get_peft_model(model, lora_config)
+
+    # Cast any remaining bf16 params to fp16 for T4 GPU compatibility
+    for param in model.parameters():
+        if param.dtype == torch.bfloat16:
+            param.data = param.data.to(torch.float16)
+
     model.print_trainable_parameters()
     return model
 
@@ -96,7 +107,6 @@ def build_trainer(model, tokenizer, train_dataset, val_dataset):
     config.CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
     config.ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
 
-    # transformers >= 4.46 renamed evaluation_strategy -> eval_strategy
     eval_key = 'eval_strategy' if _ver(transformers.__version__) >= (4, 46) else 'evaluation_strategy'
 
     training_args = TrainingArguments(
@@ -126,8 +136,6 @@ def build_trainer(model, tokenizer, train_dataset, val_dataset):
     trl_ver = _ver(_trl.__version__)
 
     if trl_ver >= (1, 0):
-        # trl >= 1.0: SFTTrainer uses processing_class, no dataset_text_field/max_seq_length
-        # Pre-tokenize dataset to avoid internal API issues
         def tokenize(example):
             out = tokenizer(
                 example['text'],
@@ -149,7 +157,6 @@ def build_trainer(model, tokenizer, train_dataset, val_dataset):
             args=training_args,
         )
     else:
-        # trl < 1.0: original simple API
         trainer = SFTTrainer(
             model=model,
             train_dataset=train_dataset,
