@@ -14,24 +14,30 @@ Requirements:
 """
 
 import sys
+import re
 import torch
+import transformers
 from datasets import load_from_disk
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    TrainingArguments,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer, SFTConfig
+from trl import SFTTrainer
 
 import config
+
+
+def _ver(v):
+    return tuple(int(x) for x in re.split(r'[^0-9]+', v)[:2])
 
 
 def check_gpu():
     if not torch.cuda.is_available():
         print('ERROR: No GPU detected.')
-        print('  - On Colab: Runtime → Change runtime type → T4 GPU')
-        print('  - On Windows: use WSL2 or run on Colab')
+        print('  - On Colab/Kaggle: enable GPU in runtime settings')
         sys.exit(1)
     name = torch.cuda.get_device_name(0)
     vram = torch.cuda.get_device_properties(0).total_memory / 1e9
@@ -47,7 +53,6 @@ def load_tokenizer() -> AutoTokenizer:
     tokenizer = AutoTokenizer.from_pretrained(config.BASE_MODEL, **kwargs)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'right'
-    tokenizer.model_max_length = config.MAX_SEQ_LEN
     return tokenizer
 
 
@@ -86,6 +91,78 @@ def apply_lora(model: AutoModelForCausalLM) -> AutoModelForCausalLM:
     return model
 
 
+def build_trainer(model, tokenizer, train_dataset, val_dataset):
+    config.CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+    config.ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
+
+    # transformers >= 4.46 renamed evaluation_strategy -> eval_strategy
+    eval_key = 'eval_strategy' if _ver(transformers.__version__) >= (4, 46) else 'evaluation_strategy'
+
+    training_args = TrainingArguments(
+        output_dir=str(config.CHECKPOINTS_DIR),
+        max_steps=config.MAX_STEPS,
+        per_device_train_batch_size=config.BATCH_SIZE,
+        per_device_eval_batch_size=config.BATCH_SIZE,
+        gradient_accumulation_steps=config.GRAD_ACC,
+        gradient_checkpointing=True,
+        optim='paged_adamw_32bit',
+        learning_rate=config.LEARNING_RATE,
+        weight_decay=0.001,
+        fp16=True,
+        bf16=False,
+        max_grad_norm=0.3,
+        warmup_ratio=0.03,
+        lr_scheduler_type='cosine',
+        logging_steps=25,
+        **{eval_key: 'steps'},
+        eval_steps=100,
+        save_steps=100,
+        load_best_model_at_end=True,
+        report_to='none',
+    )
+
+    import trl as _trl
+    trl_ver = _ver(_trl.__version__)
+
+    if trl_ver >= (1, 0):
+        # trl >= 1.0: SFTTrainer uses processing_class, no dataset_text_field/max_seq_length
+        # Pre-tokenize dataset to avoid internal API issues
+        def tokenize(example):
+            out = tokenizer(
+                example['text'],
+                truncation=True,
+                max_length=config.MAX_SEQ_LEN,
+                padding=False,
+            )
+            out['labels'] = out['input_ids'].copy()
+            return out
+
+        tok_train = train_dataset.map(tokenize, remove_columns=train_dataset.column_names)
+        tok_val   = val_dataset.map(tokenize,   remove_columns=val_dataset.column_names)
+
+        trainer = SFTTrainer(
+            model=model,
+            train_dataset=tok_train,
+            eval_dataset=tok_val,
+            processing_class=tokenizer,
+            args=training_args,
+        )
+    else:
+        # trl < 1.0: original simple API
+        trainer = SFTTrainer(
+            model=model,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            tokenizer=tokenizer,
+            args=training_args,
+            dataset_text_field='text',
+            max_seq_length=config.MAX_SEQ_LEN,
+            packing=False,
+        )
+
+    return trainer
+
+
 def main():
     check_gpu()
 
@@ -108,41 +185,8 @@ def main():
     print('\nApplying QLoRA...')
     model = apply_lora(model)
 
-    config.CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
-    config.ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
-
-    training_args = SFTConfig(
-        output_dir=str(config.CHECKPOINTS_DIR),
-        max_steps=config.MAX_STEPS,
-        per_device_train_batch_size=config.BATCH_SIZE,
-        per_device_eval_batch_size=config.BATCH_SIZE,
-        gradient_accumulation_steps=config.GRAD_ACC,
-        gradient_checkpointing=True,
-        optim='paged_adamw_32bit',
-        learning_rate=config.LEARNING_RATE,
-        weight_decay=0.001,
-        fp16=True,
-        bf16=False,
-        max_grad_norm=0.3,
-        warmup_ratio=0.03,
-        lr_scheduler_type='cosine',
-        logging_steps=25,
-        eval_strategy='steps',
-        eval_steps=100,
-        save_steps=100,
-        load_best_model_at_end=True,
-        report_to='none',
-        packing=False,
-    )
-
-    trainer = SFTTrainer(
-        model=model,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        processing_class=tokenizer,
-        args=training_args,
-        formatting_func=lambda x: x['text'],
-    )
+    print('\nSetting up trainer...')
+    trainer = build_trainer(model, tokenizer, train_dataset, val_dataset)
 
     print('\nTraining started...')
     trainer.train()
