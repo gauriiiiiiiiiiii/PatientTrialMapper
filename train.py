@@ -132,7 +132,6 @@ def main():
         save_steps=100,
         load_best_model_at_end=True,
         report_to='none',
-        dataset_text_field='text',
         packing=False,
     )
 
@@ -142,6 +141,7 @@ def main():
         eval_dataset=val_dataset,
         processing_class=tokenizer,
         args=training_args,
+        formatting_func=lambda x: x['text'],
     )
 
     print('\nTraining started...')
