@@ -20,10 +20,9 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 
 import config
 
@@ -111,12 +110,7 @@ def main():
     config.CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
     config.ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
 
-    import transformers, trl, re as _re
-    def _ver(v): return tuple(int(x) for x in _re.split(r'[^0-9]+', v)[:2])
-    eval_key        = 'eval_strategy'    if _ver(transformers.__version__) >= (4, 46) else 'evaluation_strategy'
-    trainer_tok_key = 'processing_class' if _ver(trl.__version__)          >= (0, 9)  else 'tokenizer'
-
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=str(config.CHECKPOINTS_DIR),
         max_steps=config.MAX_STEPS,
         per_device_train_batch_size=config.BATCH_SIZE,
@@ -132,22 +126,22 @@ def main():
         warmup_ratio=0.03,
         lr_scheduler_type='cosine',
         logging_steps=25,
-        **{eval_key: 'steps'},
+        eval_strategy='steps',
         eval_steps=100,
         save_steps=100,
         load_best_model_at_end=True,
         report_to='none',
+        dataset_text_field='text',
+        max_seq_length=config.MAX_SEQ_LEN,
+        packing=False,
     )
 
     trainer = SFTTrainer(
         model=model,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        **{trainer_tok_key: tokenizer},
+        processing_class=tokenizer,
         args=training_args,
-        dataset_text_field='text',
-        max_seq_length=config.MAX_SEQ_LEN,
-        packing=False,
     )
 
     print('\nTraining started...')
