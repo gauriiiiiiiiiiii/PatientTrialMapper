@@ -378,7 +378,7 @@ if screen_clicked:
                 if model_ready:
                     model, tokenizer = _load_model()
                     if model is None:
-                        result = {'label': 'Unknown', 'reasoning': 'Model failed to load. Check GPU availability and bitsandbytes installation.', 'confidence': 'N/A'}
+                        result = _demo_predict(patient_val, criteria_val)
                     else:
                         from predict import predict as _predict
                         result = _predict(patient_val, criteria_val, model, tokenizer)
