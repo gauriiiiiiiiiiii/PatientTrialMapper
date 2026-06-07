@@ -47,6 +47,7 @@ def load_tokenizer() -> AutoTokenizer:
     tokenizer = AutoTokenizer.from_pretrained(config.BASE_MODEL, **kwargs)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'right'
+    tokenizer.model_max_length = config.MAX_SEQ_LEN
     return tokenizer
 
 
@@ -132,7 +133,6 @@ def main():
         load_best_model_at_end=True,
         report_to='none',
         dataset_text_field='text',
-        max_seq_length=config.MAX_SEQ_LEN,
         packing=False,
     )
 
