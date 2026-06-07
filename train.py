@@ -119,7 +119,7 @@ def build_trainer(model, tokenizer, train_dataset, val_dataset):
         optim='paged_adamw_32bit',
         learning_rate=config.LEARNING_RATE,
         weight_decay=0.001,
-        fp16=True,
+        fp16=False,
         bf16=False,
         max_grad_norm=0.3,
         warmup_ratio=0.03,
