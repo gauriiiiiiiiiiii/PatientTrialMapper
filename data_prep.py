@@ -14,13 +14,8 @@ under data/raw/ (see TREC 2022 section below).
 """
 
 import json
-import sys
 import xml.etree.ElementTree as ET
-import pandas as pd
-import matplotlib.pyplot as plt
 from pathlib import Path
-from sklearn.model_selection import train_test_split
-from datasets import Dataset
 
 import config
 
@@ -291,7 +286,11 @@ def format_for_training(example: dict) -> dict:
 
 # ── EDA ───────────────────────────────────────────────────────────────────────
 
-def run_eda(df: pd.DataFrame) -> None:
+def run_eda(df) -> None:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
     print('\n── Label distribution ──')
     print(df['response'].value_counts().to_string())
 
@@ -321,6 +320,10 @@ def run_eda(df: pd.DataFrame) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    import pandas as pd
+    from sklearn.model_selection import train_test_split
+    from datasets import Dataset
+
     config.DATA_DIR.mkdir(exist_ok=True)
 
     data = list(SAMPLE_DATA)

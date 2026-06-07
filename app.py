@@ -3,12 +3,19 @@ app.py — PatientTrialMapper | Clinical Trial Eligibility Screener
 Run: streamlit run app.py
 """
 
+import traceback
 from datetime import datetime
 
 import streamlit as st
 
 import config
-from data_prep import SAMPLE_DATA
+try:
+    from data_prep import SAMPLE_DATA
+except Exception as _e:
+    SAMPLE_DATA = []
+    _SAMPLE_DATA_ERR = str(_e)
+else:
+    _SAMPLE_DATA_ERR = None
 
 # ── Page config (must be first st call) ───────────────────────────────────────
 st.set_page_config(
@@ -234,6 +241,9 @@ if 'criteria_text' not in st.session_state:
 # ── Model status ──────────────────────────────────────────────────────────────
 model_ready = config.ADAPTER_DIR.exists()
 
+if _SAMPLE_DATA_ERR:
+    st.warning(f'Sample data load error (examples unavailable): {_SAMPLE_DATA_ERR}')
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
@@ -261,7 +271,7 @@ with st.sidebar:
         f"{'✅' if ex['label']=='Eligible' else '❌'} {ex['patient'][:45]}…"
         for ex in SAMPLE_DATA
     ]
-    chosen = st.selectbox('', ['— select —'] + example_names, label_visibility='collapsed')
+    chosen = st.selectbox('Load Example', ['— select —'] + example_names, label_visibility='collapsed')
     if chosen != '— select —':
         idx = example_names.index(chosen)
         st.session_state.patient_text  = SAMPLE_DATA[idx]['patient']
@@ -325,21 +335,19 @@ with left:
     st.markdown('<div class="section-label">Patient Narrative</div>', unsafe_allow_html=True)
     patient_input = st.text_area(
         label='Patient Narrative',
-        value=st.session_state.patient_text,
         placeholder='Describe the patient age, primary diagnosis, medications, relevant history, and any recent lab values...',
         height=170,
         label_visibility='collapsed',
-        key='patient_area',
+        key='patient_text',
     )
 
     st.markdown('<div class="section-label" style="margin-top:0.75rem;">Trial Eligibility Criteria</div>', unsafe_allow_html=True)
     criteria_input = st.text_area(
         label='Trial Eligibility Criteria',
-        value=st.session_state.criteria_text,
         placeholder='List inclusion and exclusion criteria, one per line (use "- " bullet points)…',
         height=170,
         label_visibility='collapsed',
-        key='criteria_area',
+        key='criteria_text',
     )
 
     col_btn, col_clear = st.columns([3, 1])
@@ -347,7 +355,7 @@ with left:
         screen_clicked = st.button('🔍  Screen Patient', type='primary', use_container_width=True)
     with col_clear:
         if st.button('Clear', use_container_width=True):
-            st.session_state.patient_text  = ''
+            st.session_state.patient_text = ''
             st.session_state.criteria_text = ''
             st.rerun()
 
